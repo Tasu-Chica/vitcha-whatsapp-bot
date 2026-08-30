@@ -1,4 +1,10 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const express = require('express');
@@ -30,7 +36,7 @@ function saveActivity() {
 
 // Bot State & Live Metrics
 let botState = {
-  status: 'INITIALIZING', // INITIALIZING | QR_READY | AUTHENTICATING | ONLINE | DISCONNECTED | AUTH_FAILURE
+  status: 'INITIALIZING', // INITIALIZING | QR_READY | CONNECTING | ONLINE | DISCONNECTED
   qrDataUrl: null,
   qrRaw: null,
   startTime: Date.now(),
@@ -48,60 +54,15 @@ function updateState(status, lastEvent) {
   }
 }
 
-// =================================================================
-// 2. Cross-Platform Chromium / Chrome Detection
-// =================================================================
-function getBrowserExecutablePath() {
-  // If explicitly provided via environment (e.g. in Docker)
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-
-  // Linux / Cloud container common paths
-  const linuxPaths = [
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/snap/bin/chromium'
-  ];
-
-  // Windows common paths
-  const winPaths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-    path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
-    path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe')
-  ];
-
-  const candidatePaths = process.platform === 'win32' ? winPaths : linuxPaths;
-  for (const p of candidatePaths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-  return undefined;
-}
-
-const browserPath = getBrowserExecutablePath();
-
 console.log('\n=============================================');
 console.log("  🤖 Vitcha - Tahsin's WhatsApp AI Bot       ");
+console.log("  ⚡ Engine: High-Performance Baileys Socket ");
 console.log('=============================================\n');
-if (browserPath) {
-  console.log(`🌐 Using browser: ${browserPath}`);
-} else {
-  console.log('🌐 Using default bundled Chromium');
-}
 console.log(`⏱️  Inactivity threshold: ${config.inactivityThresholdMinutes} minute(s)`);
 console.log(`🌐 Web Dashboard Port: ${config.port}\n`);
 
 // =================================================================
-// 3. Express Web Server (Dashboard, Cloud Health Check & QR Viewer)
+// 2. Express Web Server (Dashboard, Health Check & QR Viewer)
 // =================================================================
 const app = express();
 
@@ -109,7 +70,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     botStatus: botState.status,
-    uptimeSeconds: Math.floor((Date.now() - botState.startTime) / 1000)
+    uptimeSeconds: Math.floor((Date.now() - botState.startTime) / 1000),
+    memoryUsageMB: Math.round(process.memoryUsage().rss / (1024 * 1024))
   });
 });
 
@@ -122,6 +84,7 @@ app.get('/api/status', (req, res) => {
     activeContacts: Object.keys(activityMap).length,
     lastEvent: botState.lastEvent,
     lastEventTime: botState.lastEventTime,
+    memoryUsageMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     hasQr: !!botState.qrDataUrl,
     qrDataUrl: botState.qrDataUrl
   });
@@ -130,6 +93,7 @@ app.get('/api/status', (req, res) => {
 app.get('/', (req, res) => {
   const uptimeHours = ((Date.now() - botState.startTime) / (1000 * 60 * 60)).toFixed(2);
   const activeContactsCount = Object.keys(activityMap).length;
+  const memoryMB = Math.round(process.memoryUsage().rss / (1024 * 1024));
 
   let badgeColor = '#64748b';
   let badgeText = botState.status;
@@ -140,10 +104,10 @@ app.get('/', (req, res) => {
   } else if (botState.status === 'QR_READY') {
     badgeColor = '#f59e0b';
     badgeText = 'WAITING FOR QR SCAN';
-  } else if (botState.status === 'AUTHENTICATING') {
+  } else if (botState.status === 'CONNECTING') {
     badgeColor = '#3b82f6';
-    badgeText = 'AUTHENTICATING...';
-  } else if (botState.status === 'DISCONNECTED' || botState.status === 'AUTH_FAILURE') {
+    badgeText = 'CONNECTING...';
+  } else if (botState.status === 'DISCONNECTED') {
     badgeColor = '#ef4444';
     badgeText = 'DISCONNECTED';
   }
@@ -313,8 +277,8 @@ app.get('/', (req, res) => {
           <div class="stat-val">${activeContactsCount}</div>
         </div>
         <div class="stat-item">
-          <div class="stat-label">Uptime</div>
-          <div class="stat-val">${uptimeHours}h</div>
+          <div class="stat-label">RAM Usage</div>
+          <div class="stat-val">${memoryMB} MB</div>
         </div>
       </div>
     </div>
@@ -332,7 +296,7 @@ app.get('/', (req, res) => {
     </div>
 
     <div class="footer">
-      Last status update: ${new Date(botState.lastEventTime).toLocaleTimeString()} (${botState.lastEvent})
+      Uptime: ${uptimeHours}h • Last update: ${new Date(botState.lastEventTime).toLocaleTimeString()} (${botState.lastEvent})
     </div>
   </div>
 </body>
@@ -346,215 +310,169 @@ app.listen(config.port, '0.0.0.0', () => {
 });
 
 // =================================================================
-// 4. WhatsApp Web Client Setup (Optimized for 512MB RAM Containers)
+// 3. Baileys WhatsApp Socket Client
 // =================================================================
-const puppeteerArgs = [
-  '--no-sandbox',
-  '--disable-setuid-sandbox',
-  '--disable-dev-shm-usage',
-  '--disable-accelerated-2d-canvas',
-  '--no-first-run',
-  '--no-zygote',
-  '--disable-gpu',
-  '--disable-software-rasterizer',
-  '--disable-extensions',
-  '--disable-background-networking',
-  '--disable-background-timer-throttling',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-breakpad',
-  '--disable-client-side-phishing-detection',
-  '--disable-component-update',
-  '--disable-default-apps',
-  '--disable-domain-reliability',
-  '--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,TranslateUI',
-  '--disable-hang-monitor',
-  '--disable-ipc-flooding-protection',
-  '--disable-notifications',
-  '--disable-popup-blocking',
-  '--disable-print-preview',
-  '--disable-prompt-on-repost',
-  '--disable-renderer-backgrounding',
-  '--disable-speech-api',
-  '--disable-sync',
-  '--hide-scrollbars',
-  '--ignore-gpu-blacklist',
-  '--metrics-recording-only',
-  '--mute-audio',
-  '--no-default-browser-check',
-  '--no-pings',
-  '--password-store=basic',
-  '--use-mock-keychain',
-  '--js-flags=--max-old-space-size=256'
-];
+let sock = null;
 
-const client = new Client({
-  authStrategy: new LocalAuth({
-    dataPath: path.join(__dirname, '.wwebjs_auth')
-  }),
-  puppeteer: {
-    headless: true,
-    executablePath: browserPath,
-    args: puppeteerArgs
-  }
-});
-
-// Event: QR Code received
-client.on('qr', async (qr) => {
-  botState.qrRaw = qr;
-  try {
-    botState.qrDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
-  } catch (err) {
-    console.error('Error generating QR Data URL:', err);
-  }
-  updateState('QR_READY', 'QR code generated. Awaiting scan.');
-
-  console.log('\x1b[33m%s\x1b[0m', '📲 Scan this QR code with WhatsApp on your phone:');
-  console.log('   (WhatsApp > Settings > Linked Devices > Link a Device)');
-  console.log(`   Or open Web Dashboard: http://localhost:${config.port}\n`);
-  qrcodeTerminal.generate(qr, { small: true });
-});
-
-// Event: Successfully authenticated
-client.on('authenticated', () => {
-  botState.qrDataUrl = null;
-  updateState('AUTHENTICATING', 'Authenticated successfully. Initializing session.');
-  console.log('\x1b[32m%s\x1b[0m', '✅ WhatsApp Authentication Successful!');
-});
-
-// Event: Ready to process messages
-client.on('ready', () => {
-  botState.qrDataUrl = null;
-  updateState('ONLINE', 'Bot is online and actively monitoring messages.');
-  console.log('\x1b[32m%s\x1b[0m', "🚀 Vitcha is ONLINE and actively watching over your chats!\n");
-});
-
-// Helper to handle auto-reply logic for incoming messages
-async function handleIncomingMessage(msg) {
-  try {
-    const from = msg.from;
-    const body = msg.body || '';
-
-    botState.messagesReceived++;
-
-    // Ignore status broadcast updates
-    if (config.ignoreStatus && (from === 'status@broadcast' || msg.isStatus || from.includes('broadcast'))) {
-      return;
-    }
-
-    // Ignore group chats
-    if (config.ignoreGroups && from.includes('@g.us')) {
-      return;
-    }
-
-    // Check blacklist / whitelist
-    if (config.blacklist && config.blacklist.includes(from)) return;
-    if (config.whitelist && config.whitelist.length > 0 && !config.whitelist.includes(from)) return;
-
-    const contactId = from;
-    const now = Date.now();
-    const lastSeen = activityMap[contactId];
-
-    let shouldReply = false;
-    let timeDiffMinutes = 0;
-
-    if (!lastSeen) {
-      // First interaction recorded
-      shouldReply = true;
-    } else {
-      timeDiffMinutes = (now - lastSeen) / (1000 * 60);
-      if (timeDiffMinutes >= config.inactivityThresholdMinutes) {
-        shouldReply = true;
-      }
-    }
-
-    // Update last interaction timestamp
-    activityMap[contactId] = now;
-    saveActivity();
-
-    console.log(`\n📩 [Message Received] From: ${contactId}`);
-    console.log(`💬 Text: "${body}"`);
-
-    if (shouldReply) {
-      const reason = !lastSeen
-        ? 'First message from this contact'
-        : `Inactive for ${timeDiffMinutes.toFixed(1)} mins (>= ${config.inactivityThresholdMinutes}m threshold)`;
-      console.log(`🤖 [Triggered] Replying because: ${reason}`);
-
-      // Simulate natural typing delay
-      try {
-        const chat = await msg.getChat();
-        if (chat && typeof chat.sendStateTyping === 'function') {
-          await chat.sendStateTyping();
-        }
-      } catch (err) {
-        // Continue even if typing state fails
-      }
-
-      if (config.replyDelaySeconds > 0) {
-        await new Promise((r) => setTimeout(r, config.replyDelaySeconds * 1000));
-      }
-
-      // Send Vitcha auto-reply
-      try {
-        await msg.reply(config.autoReplyMessage);
-      } catch (replyErr) {
-        // Fallback: send direct to chat ID
-        await client.sendMessage(contactId, config.autoReplyMessage);
-      }
-
-      botState.repliesSent++;
-      updateState('ONLINE', `Replied to contact ${contactId}`);
-      console.log(`✅ [Vitcha Replied] Successfully sent message to ${contactId}\n`);
-    } else {
-      console.log(`⏳ [Skipping Reply] Ongoing conversation. Last activity was ${timeDiffMinutes.toFixed(1)} mins ago (< ${config.inactivityThresholdMinutes}m).\n`);
-    }
-  } catch (err) {
-    console.error('❌ Error processing message:', err);
-  }
+function extractText(msg) {
+  if (!msg.message) return '';
+  return msg.message.conversation ||
+         msg.message.extendedTextMessage?.text ||
+         msg.message.imageMessage?.caption ||
+         msg.message.videoMessage?.caption ||
+         '';
 }
 
-// Listen to all created messages (both incoming & outgoing)
-client.on('message_create', async (msg) => {
-  try {
-    // If message is sent BY Tahsin himself:
-    if (msg.fromMe) {
-      // Update contact timestamp so Tahsin's own replies reset the 1-hour window
-      if (msg.to && !msg.to.includes('@g.us') && msg.to !== 'status@broadcast') {
-        activityMap[msg.to] = Date.now();
-        saveActivity();
-      }
+async function connectToWhatsApp() {
+  const authFolder = path.join(__dirname, '.wwebjs_auth');
+  const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+  const { version } = await fetchLatestBaileysVersion();
 
-      // Special test trigger: If Tahsin texts "!testvitcha" in any chat or to himself:
-      if (msg.body && msg.body.trim().toLowerCase() === '!testvitcha') {
-        console.log('\n🧪 [Manual Test Triggered by you]');
-        await msg.reply(config.autoReplyMessage);
-        botState.repliesSent++;
-        console.log('✅ Sent test reply!\n');
+  console.log(`📡 Connecting to WhatsApp multi-device (Baileys v${version.join('.')})...`);
+
+  sock = makeWASocket({
+    version,
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: true,
+    auth: state,
+    generateHighQualityLinkPreview: false,
+    syncFullHistory: false
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      botState.qrRaw = qr;
+      try {
+        botState.qrDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
+      } catch (err) {
+        console.error('Error generating QR Data URL:', err);
       }
-      return;
+      updateState('QR_READY', 'QR code generated. Awaiting scan.');
+      console.log('\n📲 Scan QR code from Web Dashboard or terminal:');
+      qrcodeTerminal.generate(qr, { small: true });
     }
 
-    // Message is from someone else:
-    await handleIncomingMessage(msg);
-  } catch (e) {
-    console.error('❌ Error in message_create event:', e);
-  }
-});
+    if (connection === 'close') {
+      const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      const reason = lastDisconnect?.error?.message || `Status: ${statusCode}`;
+      console.log(`⚠️ Connection closed (${reason}). Reconnecting: ${shouldReconnect}`);
+      updateState('DISCONNECTED', `Disconnected: ${reason}`);
 
-// Event: Authentication failure
-client.on('auth_failure', (msg) => {
-  updateState('AUTH_FAILURE', `Authentication failed: ${msg}`);
-  console.error('\x1b[31m%s\x1b[0m', '❌ Authentication failure:', msg);
-});
+      if (shouldReconnect) {
+        setTimeout(connectToWhatsApp, 3000);
+      }
+    } else if (connection === 'open') {
+      botState.qrDataUrl = null;
+      updateState('ONLINE', 'Bot is online and actively monitoring messages.');
+      console.log('\x1b[32m%s\x1b[0m', '\n🚀 Vitcha is ONLINE and actively watching over your chats!\n');
+    }
+  });
 
-// Event: Disconnected
-client.on('disconnected', (reason) => {
-  updateState('DISCONNECTED', `Disconnected: ${reason}`);
-  console.warn('\x1b[33m%s\x1b[0m', '⚠️ Bot was disconnected:', reason);
-});
+  // Handle incoming & outgoing messages
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
 
-// Global unhandled rejection handlers to prevent container crashes
-process.on('unhandledRejection', (reason, promise) => {
+    for (const msg of messages) {
+      try {
+        if (!msg.key || !msg.message) continue;
+
+        const remoteJid = msg.key.remoteJid;
+        const fromMe = msg.key.fromMe;
+        const text = extractText(msg).trim();
+
+        botState.messagesReceived++;
+
+        // Ignore status broadcasts
+        if (remoteJid === 'status@broadcast' || remoteJid.includes('broadcast')) {
+          continue;
+        }
+
+        // Ignore group chats if configured
+        if (config.ignoreGroups && remoteJid.endsWith('@g.us')) {
+          continue;
+        }
+
+        // Handle Tahsin's own outgoing messages
+        if (fromMe) {
+          activityMap[remoteJid] = Date.now();
+          saveActivity();
+
+          // Manual test trigger '!testvitcha'
+          if (text.toLowerCase() === '!testvitcha') {
+            console.log('\n🧪 [Manual Test Triggered by you]');
+            await sock.sendMessage(remoteJid, { text: config.autoReplyMessage }, { quoted: msg });
+            botState.repliesSent++;
+            console.log('✅ Sent test reply!\n');
+          }
+          continue;
+        }
+
+        // Handle incoming messages from other people
+        const contactId = remoteJid;
+        const now = Date.now();
+        const lastSeen = activityMap[contactId];
+
+        let shouldReply = false;
+        let timeDiffMinutes = 0;
+
+        if (!lastSeen) {
+          shouldReply = true;
+        } else {
+          timeDiffMinutes = (now - lastSeen) / (1000 * 60);
+          if (timeDiffMinutes >= config.inactivityThresholdMinutes) {
+            shouldReply = true;
+          }
+        }
+
+        // Update contact last seen
+        activityMap[contactId] = now;
+        saveActivity();
+
+        console.log(`\n📩 [Message Received] From: ${contactId}`);
+        console.log(`💬 Text: "${text}"`);
+
+        if (shouldReply) {
+          const reason = !lastSeen
+            ? 'First message from this contact'
+            : `Inactive for ${timeDiffMinutes.toFixed(1)} mins (>= ${config.inactivityThresholdMinutes}m threshold)`;
+          console.log(`🤖 [Triggered] Replying because: ${reason}`);
+
+          // Simulate typing
+          try {
+            await sock.sendPresenceUpdate('composing', remoteJid);
+          } catch (e) {}
+
+          if (config.replyDelaySeconds > 0) {
+            await new Promise((r) => setTimeout(r, config.replyDelaySeconds * 1000));
+          }
+
+          try {
+            await sock.sendPresenceUpdate('paused', remoteJid);
+          } catch (e) {}
+
+          // Send reply
+          await sock.sendMessage(remoteJid, { text: config.autoReplyMessage }, { quoted: msg });
+
+          botState.repliesSent++;
+          updateState('ONLINE', `Replied to contact ${contactId}`);
+          console.log(`✅ [Vitcha Replied] Successfully sent message to ${contactId}\n`);
+        } else {
+          console.log(`⏳ [Skipping Reply] Ongoing conversation. Last activity was ${timeDiffMinutes.toFixed(1)} mins ago (< ${config.inactivityThresholdMinutes}m).\n`);
+        }
+      } catch (err) {
+        console.error('❌ Error handling message:', err);
+      }
+    }
+  });
+}
+
+// Global safety error handlers
+process.on('unhandledRejection', (reason) => {
   console.error('⚠️ Unhandled Rejection:', reason);
 });
 
@@ -562,7 +480,8 @@ process.on('uncaughtException', (err) => {
   console.error('⚠️ Uncaught Exception:', err);
 });
 
-client.initialize().catch((err) => {
-  console.error('❌ Failed to initialize WhatsApp client:', err.message);
-  updateState('AUTH_FAILURE', `Initialization error: ${err.message}`);
+// Start WhatsApp connection
+connectToWhatsApp().catch((err) => {
+  console.error('❌ Failed to start WhatsApp bot:', err);
+  updateState('DISCONNECTED', `Failed to start: ${err.message}`);
 });
