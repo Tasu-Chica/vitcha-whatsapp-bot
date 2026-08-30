@@ -346,7 +346,7 @@ app.listen(config.port, '0.0.0.0', () => {
 });
 
 // =================================================================
-// 4. WhatsApp Web Client Setup
+// 4. WhatsApp Web Client Setup (Optimized for 512MB RAM Containers)
 // =================================================================
 const puppeteerArgs = [
   '--no-sandbox',
@@ -355,7 +355,36 @@ const puppeteerArgs = [
   '--disable-accelerated-2d-canvas',
   '--no-first-run',
   '--no-zygote',
-  '--disable-gpu'
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-breakpad',
+  '--disable-client-side-phishing-detection',
+  '--disable-component-update',
+  '--disable-default-apps',
+  '--disable-domain-reliability',
+  '--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,TranslateUI',
+  '--disable-hang-monitor',
+  '--disable-ipc-flooding-protection',
+  '--disable-notifications',
+  '--disable-popup-blocking',
+  '--disable-print-preview',
+  '--disable-prompt-on-repost',
+  '--disable-renderer-backgrounding',
+  '--disable-speech-api',
+  '--disable-sync',
+  '--hide-scrollbars',
+  '--ignore-gpu-blacklist',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--no-default-browser-check',
+  '--no-pings',
+  '--password-store=basic',
+  '--use-mock-keychain',
+  '--js-flags=--max-old-space-size=256'
 ];
 
 const client = new Client({
