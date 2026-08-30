@@ -1,26 +1,26 @@
 {
   "name": "whatsapp-autoreply-bot",
   "version": "1.0.0",
-  "description": "Customizable WhatsApp Auto-Reply Bot built with whatsapp-web.js",
+  "description": "Customizable WhatsApp Auto-Reply Bot for Tahsin",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test:rules": "node test-rules.js"
+    "start": "node index.js"
   },
   "keywords": [
     "whatsapp",
     "bot",
     "auto-reply",
-    "whatsapp-web.js",
+    "baileys",
     "automation"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
+    "pino": "^10.3.1",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.26.0"
+    "qrcode-terminal": "^0.12.0"
   }
 }
