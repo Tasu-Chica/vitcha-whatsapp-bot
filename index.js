@@ -351,17 +351,12 @@ app.listen(config.port, '0.0.0.0', () => {
 const puppeteerArgs = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
-  '--disable-extensions',
   '--disable-dev-shm-usage',
-  '--disable-gpu',
+  '--disable-accelerated-2d-canvas',
   '--no-first-run',
-  '--no-zygote'
+  '--no-zygote',
+  '--disable-gpu'
 ];
-
-// Single-process is helpful on low-memory free containers (Render/Koyeb 512MB RAM)
-if (process.env.NODE_ENV === 'production' || process.platform !== 'win32') {
-  puppeteerArgs.push('--single-process');
-}
 
 const client = new Client({
   authStrategy: new LocalAuth({
@@ -529,4 +524,16 @@ client.on('disconnected', (reason) => {
   console.warn('\x1b[33m%s\x1b[0m', '⚠️ Bot was disconnected:', reason);
 });
 
-client.initialize();
+// Global unhandled rejection handlers to prevent container crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception:', err);
+});
+
+client.initialize().catch((err) => {
+  console.error('❌ Failed to initialize WhatsApp client:', err.message);
+  updateState('AUTH_FAILURE', `Initialization error: ${err.message}`);
+});
