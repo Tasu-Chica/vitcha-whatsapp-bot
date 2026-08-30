@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: vitcha-whatsapp-bot
+    env: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: INACTIVITY_MINUTES
+        value: "60"
+      - key: AUTO_REPLY_MESSAGE
+        value: "Hey this is Vitcha, Tahsin's ai bot. He's either doomscrolling or sleeping his ass off. But dw, I will notify him and he'll be with you shortly. Thank you for your patience."
