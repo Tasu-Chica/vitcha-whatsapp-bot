@@ -8,6 +8,8 @@ services:
     envVars:
       - key: PORT
         value: 3000
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=256"
       - key: INACTIVITY_MINUTES
         value: "60"
       - key: AUTO_REPLY_MESSAGE
