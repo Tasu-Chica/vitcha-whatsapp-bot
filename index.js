@@ -405,7 +405,7 @@ async function connectToWhatsApp() {
           // Manual test trigger '!testvitcha'
           if (text.toLowerCase() === '!testvitcha') {
             console.log('\n🧪 [Manual Test Triggered by you]');
-            await sock.sendMessage(remoteJid, { text: config.autoReplyMessage }, { quoted: msg });
+            await sock.sendMessage(remoteJid, { text: config.autoReplyMessage });
             botState.repliesSent++;
             console.log('✅ Sent test reply!\n');
           }
@@ -456,7 +456,7 @@ async function connectToWhatsApp() {
           } catch (e) {}
 
           // Send reply
-          await sock.sendMessage(remoteJid, { text: config.autoReplyMessage }, { quoted: msg });
+          await sock.sendMessage(remoteJid, { text: config.autoReplyMessage });
 
           botState.repliesSent++;
           updateState('ONLINE', `Replied to contact ${contactId}`);
